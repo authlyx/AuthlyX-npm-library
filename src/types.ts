@@ -33,6 +33,7 @@ export type AuthlyXUpdateData = {
   available: boolean;
   latestVersion: string;
   downloadUrl: string | null;
+  autoUpdateEnabled: boolean;
   forceUpdate: boolean;
   changelog: string;
   showReminder: boolean;

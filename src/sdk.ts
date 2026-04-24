@@ -102,6 +102,7 @@ export class AuthlyX {
       available: false,
       latestVersion: '',
       downloadUrl: null,
+      autoUpdateEnabled: false,
       forceUpdate: false,
       changelog: '',
       showReminder: false,
@@ -209,15 +210,186 @@ export class AuthlyX {
 
   private loadUpdateData(obj: any): void {
     const u = obj && typeof obj === 'object' ? obj.update : null;
-    if (!u || typeof u !== 'object') return;
+    if (!u || typeof u !== 'object') {
+      if (obj && typeof obj === 'object' && (obj.auto_update_enabled !== undefined || obj.auto_update_download_url !== undefined)) {
+        this.updateData.available = true;
+        this.updateData.latestVersion = clampString(obj.server_version ?? obj.version ?? '');
+        this.updateData.autoUpdateEnabled = Boolean(obj.auto_update_enabled ?? false);
+        this.updateData.downloadUrl = obj.auto_update_download_url ?? null;
+        this.updateData.forceUpdate = Boolean(obj.force_update ?? false);
+      }
+      return;
+    }
     this.updateData.available = Boolean(u.available);
     this.updateData.latestVersion = clampString(u.latest_version ?? u.latestVersion ?? '');
+    this.updateData.autoUpdateEnabled = Boolean(u.auto_update_enabled ?? false);
     this.updateData.downloadUrl = u.download_url ?? u.downloadUrl ?? null;
     this.updateData.forceUpdate = Boolean(u.force_update ?? u.forceUpdate ?? false);
     this.updateData.changelog = clampString(u.changelog ?? '');
     this.updateData.showReminder = Boolean(u.show_reminder ?? u.showReminder ?? false);
     this.updateData.reminderMessage = clampString(u.reminder_message ?? u.reminderMessage ?? '');
     this.updateData.allowedUntil = u.allowed_until ?? u.allowedUntil ?? null;
+  }
+
+  private compareSemver(current: string, latest: string): number {
+    const strip = (s: string) => {
+      const t = clampString(s).trim();
+      const dash = t.indexOf('-');
+      return dash >= 0 ? t.slice(0, dash) : t;
+    };
+
+    const parse = (s: string) => {
+      const out = [0, 0, 0];
+      const parts = strip(s).split('.');
+      for (let i = 0; i < out.length && i < parts.length; i++) {
+        const m = String(parts[i]).match(/^\d+/);
+        out[i] = m ? Number(m[0]) : 0;
+      }
+      return out;
+    };
+
+    const a = parse(current);
+    const b = parse(latest);
+    for (let i = 0; i < 3; i++) {
+      if (a[i] < b[i]) return -1;
+      if (a[i] > b[i]) return 1;
+    }
+    return 0;
+  }
+
+  private shouldShowUpdatePrompt(forceShow: boolean): boolean {
+    if (!this.updateData.available) return false;
+    if (forceShow) return true;
+    if (!this.isClientOutdated()) return false;
+    if (!this.hasWhitelistedUpdateMessage()) return false;
+    return true;
+  }
+
+  private openUrl(url: string): void {
+    const target = clampString(url).trim();
+    if (!target) return;
+
+    const proc: any = (globalThis as any).process;
+    if (!proc || !proc.platform) return;
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const childProcess = require('child_process');
+      if (proc.platform === 'win32') childProcess.exec(`cmd /c start "" "${target}"`);
+      else if (proc.platform === 'darwin') childProcess.exec(`open "${target}"`);
+      else childProcess.exec(`xdg-open "${target}"`);
+    } catch {
+      return;
+    }
+  }
+
+  private isClientOutdated(): boolean {
+    if (!this.updateData.latestVersion) return false;
+    return this.compareSemver(this.version, this.updateData.latestVersion) < 0;
+  }
+
+  private hasWhitelistedUpdateMessage(): boolean {
+    return Boolean(this.updateData.showReminder || clampString(this.updateData.allowedUntil ?? '').trim());
+  }
+
+  private isAutoUpdateEnabled(): boolean {
+    return Boolean(this.updateData.autoUpdateEnabled);
+  }
+
+  private formatDisplayDate(rawDate: string | null): string {
+    const value = clampString(rawDate ?? '').trim();
+    if (!value) return value;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  }
+
+  private buildWhitelistedUpdateMessage(): string {
+    const allowedUntil = clampString(this.updateData.allowedUntil ?? '').trim();
+    const base = allowedUntil
+      ? `A new version is ready, and you can keep using this build until ${this.formatDisplayDate(allowedUntil)}.`
+      : 'A new version is ready, and you can still use this build for now.';
+
+    if (!this.isAutoUpdateEnabled()) return base;
+    return `${base}\n\nWould you like to download the latest version now?`;
+  }
+
+  private tryShowWindowsMessageBox(message: string, yesNo: boolean): string | null {
+    const proc: any = (globalThis as any).process;
+    if (!proc || proc.platform !== 'win32') return null;
+
+    const escape = (value: string) => clampString(value).replace(/'/g, "''");
+    const button = yesNo ? 'YesNo' : 'OK';
+    const script = [
+      'Add-Type -AssemblyName PresentationFramework',
+      `$result = [System.Windows.MessageBox]::Show('${escape(message)}', 'AuthlyX Update', [System.Windows.MessageBoxButton]::${button}, [System.Windows.MessageBoxImage]::Information)`,
+      'Write-Output $result',
+    ].join('; ');
+
+    try {
+      const childProcess = require('child_process');
+      const out = childProcess.spawnSync('powershell', ['-NoProfile', '-Command', script], { encoding: 'utf8' });
+      if (out.status === 0) return clampString(out.stdout).trim();
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  private async showRequiredUpdateConsole(): Promise<void> {
+    const message = clampString(this.response.message || '').trim() || 'Please update your app to the latest version.';
+    console.log(message);
+
+    const latest = clampString(this.updateData.latestVersion).trim();
+    if (latest) console.log(`Latest version: ${latest}`);
+
+    const downloadUrl = clampString(this.updateData.downloadUrl ?? '').trim();
+    if (!this.isAutoUpdateEnabled() || !downloadUrl) return;
+
+    console.log('1. Download Latest');
+    console.log('2. Exit');
+
+    const proc: any = (globalThis as any).process;
+    if (!proc || !proc.stdin || !proc.stdin.isTTY) return;
+
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: proc.stdin, output: proc.stdout });
+    const answer = await new Promise<string>((resolve) => rl.question('Select an option (1 or 2): ', resolve));
+    rl.close();
+    if (clampString(answer).trim() === '1') this.openUrl(downloadUrl);
+  }
+
+  private async promptUpdateIfNeeded(forceShow: boolean): Promise<void> {
+    if (!this.shouldShowUpdatePrompt(forceShow)) return;
+
+    if (forceShow) {
+      await this.showRequiredUpdateConsole();
+      return;
+    }
+
+    const downloadUrl = clampString(this.updateData.downloadUrl ?? '').trim();
+    const msg = this.buildWhitelistedUpdateMessage();
+    const useDownloadPrompt = this.isAutoUpdateEnabled() && !!downloadUrl;
+    const messageResult = this.tryShowWindowsMessageBox(msg, useDownloadPrompt);
+    if (messageResult) {
+      if (useDownloadPrompt && messageResult.toLowerCase() === 'yes') this.openUrl(downloadUrl);
+      return;
+    }
+    this.logger.log(`[UPDATE] ${msg.replace(/\n/g, ' | ')}`);
+
+    const proc: any = (globalThis as any).process;
+    if (!useDownloadPrompt || !proc || !proc.stdin || !proc.stdin.isTTY) {
+      console.log(msg);
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: proc.stdin, output: proc.stdout });
+    const answer = await new Promise<string>((resolve) => rl.question('Download the latest version now? (Y/N): ', resolve));
+    rl.close();
+    const a = clampString(answer).trim().toLowerCase();
+    if (a === 'y' || a === 'yes') this.openUrl(downloadUrl);
   }
 
   private async loadUserData(obj: any): Promise<void> {
@@ -370,6 +542,7 @@ export class AuthlyX {
     this.sessionId = clampString(resp.session_id ?? resp.sessionId ?? '');
     this.initialized = Boolean(resp.success) && Boolean(this.sessionId);
     this.loadUpdateData(resp);
+    await this.promptUpdateIfNeeded(String(this.response.code || '').toUpperCase() === 'UPDATE_REQUIRED');
     return Boolean(resp.success);
   }
 
@@ -505,4 +678,25 @@ export class AuthlyX {
     const resp = await this.post('validate', { session_id: this.sessionId });
     return Boolean(resp && resp.success);
   }
+
+  // Lowercase aliases (quality-of-life) so both `Init/init`, `Login/login`, etc work.
+  setLogger(logger: Logger): void { return this.SetLogger(logger); }
+  log(message: string): void { return this.Log(message); }
+  isInitialized(): boolean { return this.IsInitialized(); }
+  getSessionId(): string { return this.GetSessionId(); }
+
+  init(): Promise<boolean> { return this.Init(); }
+  login(identifier: string, password: string | null = null, deviceType: string | null = null): Promise<boolean> {
+    return this.Login(identifier, password, deviceType);
+  }
+  register(username: string, password: string, licenseKey: string, email = ''): Promise<boolean> {
+    return this.Register(username, password, licenseKey, email);
+  }
+  extendTime(username: string, licenseKey: string): Promise<boolean> { return this.ExtendTime(username, licenseKey); }
+  changePassword(oldPassword: string, newPassword: string): Promise<boolean> { return this.ChangePassword(oldPassword, newPassword); }
+  getVariable(key: string): Promise<string> { return this.GetVariable(key); }
+  setVariable(key: string, value: string): Promise<boolean> { return this.SetVariable(key, value); }
+  getChats(channelName: string, limit = 100, cursor: string | null = null): Promise<boolean> { return this.GetChats(channelName, limit, cursor); }
+  sendChat(message: string, channelName: string | null = null): Promise<boolean> { return this.SendChat(message, channelName); }
+  validateSession(): Promise<boolean> { return this.ValidateSession(); }
 }

@@ -12,7 +12,8 @@ function utf8Bytes(s: string): Uint8Array {
 export async function sha256Hex(data: Uint8Array): Promise<string> {
   const subtle = getSubtle();
   if (subtle) {
-    const digest = await subtle.digest('SHA-256', data);
+    const digestInput = Uint8Array.from(data).buffer;
+    const digest = await subtle.digest('SHA-256', digestInput);
     const b = new Uint8Array(digest);
     return Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
   }
