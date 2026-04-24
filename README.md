@@ -95,16 +95,3 @@ cd Examples/AuthlyX-NPM-Example
 npm install
 npm run build
 ```
-
-## Notes (security)
-
-If you use the SDK in a browser or any public client, do not embed a long-term secret in shipped code. For public clients,
-use a server-side proxy or short-lived tokens.
-
-## Python (PyPI)
-
-The Python package is published separately as:
-
-```bash
-pip install authlyx-api
-```
