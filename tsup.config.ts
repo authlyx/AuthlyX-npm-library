@@ -9,6 +9,7 @@ export default defineConfig([
     clean: true,
     target: 'es2022',
     platform: 'neutral',
+    external: ['readline', 'child_process'],
     treeshake: true,
     splitting: false,
     outExtension({ format }) {
@@ -30,4 +31,3 @@ export default defineConfig([
     },
   },
 ]);
-

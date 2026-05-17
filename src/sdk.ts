@@ -1,3 +1,4 @@
+// AuthlyX SDK Version 2.1
 import type {
   AuthlyXChatMessages,
   AuthlyXInitOptions,
@@ -16,6 +17,7 @@ type SecurityContext = { requestId: string; nonce: string; timestamp: number };
 export class AuthlyX {
   static DefaultBaseUrl = 'https://authly.cc/api/v2';
   static DefaultIpLookupUrl = 'https://api.ipify.org';
+  static DefaultServerPublicKeyPem = '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgX5lXPhkadeQozyudzTxDXopdJxYexD5qZ0yEq9UOMU=\n-----END PUBLIC KEY-----';
 
   ownerId: string;
   appName: string;
@@ -62,8 +64,8 @@ export class AuthlyX {
     this.ipLookupUrl = clampString(options.ipLookupUrl ?? AuthlyX.DefaultIpLookupUrl).trim();
     this.applicationHash = clampString(options.hash ?? '');
 
-    this.serverPublicKeyPem = clampString(options.serverPublicKeyPem ?? '');
-    this.requireSignedResponses = Boolean(options.requireSignedResponses ?? false);
+    this.serverPublicKeyPem = clampString(options.serverPublicKeyPem ?? AuthlyX.DefaultServerPublicKeyPem);
+    this.requireSignedResponses = options.requireSignedResponses !== false;
 
     this.logger = options.logger ? options.logger : createConsoleLogger(this.debug);
 
@@ -192,15 +194,17 @@ export class AuthlyX {
     return { ok: true, kid };
   }
 
-  private async maybeVerifySignedResponse(headers: Headers, canonicalBody: string): Promise<boolean> {
+  private async maybeVerifySignedResponse(headers: Headers, requestId: string, nonce: string, canonicalBody: string): Promise<boolean> {
     if (!this.serverPublicKeyPem) return !this.requireSignedResponses;
 
     const signature = headers.get('x-v2-signature') || headers.get('x-auth-signature') || '';
+    const signatureTs = headers.get('x-v2-signature-ts') || '';
     if (!signature) return !this.requireSignedResponses;
+    if (!signatureTs) return !this.requireSignedResponses;
 
     const ok = await verifyEd25519Signature({
       publicKeyPem: this.serverPublicKeyPem,
-      message: canonicalBody,
+      message: `${signatureTs}\n${requestId}\n${nonce}\n${canonicalBody}`,
       signatureBase64: signature,
     });
 
@@ -513,7 +517,7 @@ export class AuthlyX {
 
     // Optional response signature verification
     const canonicalRespBody = canonicalJson(parsed);
-    const verified = await this.maybeVerifySignedResponse(res.headers, canonicalRespBody);
+    const verified = await this.maybeVerifySignedResponse(res.headers, sec.requestId, sec.nonce, canonicalRespBody);
     if (!verified) return this.setFailure('INVALID_SIGNATURE', 'Response signature verification failed.', text, res.status);
 
     this.response.success = Boolean(parsed.success);

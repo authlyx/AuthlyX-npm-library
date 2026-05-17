@@ -87,11 +87,3 @@ import { createNodeFileLogger } from "authlyx/node";
 const sdk = new AuthlyX("12345678", "HI", "1.3", "your-secret");
 sdk.SetLogger(createNodeFileLogger({ enabled: true, appName: "HI" }));
 ```
-
-## Build locally
-
-```bash
-cd Examples/AuthlyX-NPM-Example
-npm install
-npm run build
-```
