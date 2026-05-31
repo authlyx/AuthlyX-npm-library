@@ -24,6 +24,15 @@ export function createNodeFileLogger(options: { enabled: boolean; appName: strin
         const now = new Date();
         const ymd = now.toISOString().slice(0, 10).replace(/-/g, '_');
         const file = path.join(root, `${ymd}.log`);
+        try {
+          const stat = fs.statSync(file);
+          if (stat.size > 5 * 1024 * 1024) {
+            const oldFile = path.join(root, `${ymd}_old.log`);
+            fs.renameSync(file, oldFile);
+          }
+        } catch {
+          // file does not exist yet, ignore
+        }
         const hh = String(now.getUTCHours()).padStart(2, '0');
         const mm = String(now.getUTCMinutes()).padStart(2, '0');
         const ss = String(now.getUTCSeconds()).padStart(2, '0');

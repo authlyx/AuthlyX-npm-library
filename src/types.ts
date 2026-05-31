@@ -58,6 +58,7 @@ export type AuthlyXChatMessages = {
 
 export type AuthlyXInitOptions = {
   debug?: boolean;
+  antiDebug?: boolean;
   api?: string;
   hash?: string;
   ipLookupUrl?: string;

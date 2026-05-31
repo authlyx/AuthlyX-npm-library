@@ -1,4 +1,4 @@
-// AuthlyX SDK Version 2.1
+// AuthlyX SDK Version 2.2
 import type {
   AuthlyXChatMessages,
   AuthlyXInitOptions,
@@ -10,7 +10,8 @@ import type {
 import { createConsoleLogger, type Logger } from './logger';
 import { canonicalJson, clampString, computeDaysLeft, safeJsonParse } from './utils';
 import { randomBytesHex, randomUUID } from './random';
-import { verifyEd25519Signature } from './crypto';
+import { verifyEd25519Signature, sha256HexFromString } from './crypto';
+import dns from 'node:dns';
 
 type SecurityContext = { requestId: string; nonce: string; timestamp: number };
 
@@ -25,6 +26,7 @@ export class AuthlyX {
   secret: string;
   baseUrl: string;
   debug: boolean;
+  antiDebug: boolean;
   ipLookupUrl: string;
   requireSignedResponses: boolean;
   serverPublicKeyPem: string;
@@ -32,6 +34,7 @@ export class AuthlyX {
   sessionId = '';
   initialized = false;
   applicationHash = '';
+  originalHash = '';
 
   response: AuthlyXResponse;
   userData: AuthlyXUserData;
@@ -60,6 +63,7 @@ export class AuthlyX {
       typeof debugOrOptions === 'object' && debugOrOptions !== null ? debugOrOptions : { debug: debugOrOptions };
 
     this.debug = options.debug === undefined ? true : Boolean(options.debug);
+    this.antiDebug = options.antiDebug !== false;
     this.baseUrl = clampString(options.api ?? api ?? AuthlyX.DefaultBaseUrl).trim().replace(/\/+$/, '');
     this.ipLookupUrl = clampString(options.ipLookupUrl ?? AuthlyX.DefaultIpLookupUrl).trim();
     this.applicationHash = clampString(options.hash ?? '');
@@ -121,10 +125,69 @@ export class AuthlyX {
     };
 
     this.logger.log(`[SDK] AuthlyX initialized for app '${this.appName}' using '${this.baseUrl}'.`);
+    if (this.antiDebug) this.checkDebugger();
   }
 
   SetLogger(logger: Logger): void {
     this.logger = logger;
+  }
+
+  checkDebugger(): void {
+    if (!this.antiDebug) return;
+    const proc: any = (globalThis as any).process;
+    if (!proc || !Array.isArray(proc.execArgv)) return;
+    if (proc.execArgv.some((a: string) => a.includes('--inspect') || a.includes('--debug'))) proc.exit(1);
+  }
+
+  private isPrivateIP(ip: string): boolean {
+    if (/^127\./.test(ip)) return true;
+    if (/^10\./.test(ip)) return true;
+    if (/^192\.168\./.test(ip)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
+    if (ip === '::1' || ip === '0.0.0.0') return true;
+    return false;
+  }
+
+  async isDomainHijacked(domain: string): Promise<boolean> {
+    try {
+      const addresses = await dns.promises.resolve4(domain);
+      return addresses.some((ip) => this.isPrivateIP(ip));
+    } catch {
+      return false;
+    }
+  }
+
+  async checkBlacklist(): Promise<boolean> {
+    const resp = await this.post('blacklist/check', {
+      session_id: this.sessionId,
+      hwid: this.userData.hwidSid || undefined,
+      ip: this.userData.ipAddress || undefined,
+    });
+    return Boolean(resp && resp.success);
+  }
+
+  startIntegrityHeartbeat(): void {
+    setInterval(() => {
+      this.checkDebugger();
+    }, 60000);
+  }
+
+  startExeIntegrityCheck(): void {
+    setInterval(async () => {
+      if (!this.antiDebug) return;
+      try {
+        const proc: any = (globalThis as any).process;
+        if (!proc) return;
+        const mainFile = proc.argv?.[1] ?? '';
+        if (!mainFile) return;
+        const fs = require('node:fs');
+        const content = fs.readFileSync(mainFile);
+        const hash = await sha256HexFromString(content.toString('utf8'));
+        if (this.originalHash && hash && hash !== this.originalHash) proc.exit(1);
+      } catch {
+        return;
+      }
+    }, 120000);
   }
 
   private resetResponse(): void {
@@ -418,6 +481,8 @@ export class AuthlyX {
 
     if (license) {
       this.userData.licenseKey = clampString(license.license_key ?? license.licenseKey ?? this.userData.licenseKey ?? '');
+      if (!this.userData.username) this.userData.username = clampString(license.license_key ?? '');
+      if (!this.userData.email) this.userData.email = clampString(license.email ?? '');
       if (!this.userData.subscription) this.userData.subscription = clampString(license.subscription ?? '');
       if (!this.userData.subscriptionLevel && license.subscription_level !== undefined && license.subscription_level !== null) {
         this.userData.subscriptionLevel = clampString(license.subscription_level);
@@ -425,6 +490,8 @@ export class AuthlyX {
       if (!this.userData.expiryDate) this.userData.expiryDate = clampString(license.expiry_date ?? '');
       if (!this.userData.lastLogin) this.userData.lastLogin = clampString(license.last_login ?? '');
       if (!this.userData.registeredAt) this.userData.registeredAt = clampString(license.created_at ?? license.registered_at ?? '');
+      if (!this.userData.hwidSid) this.userData.hwidSid = clampString(license.hwid ?? license.sid ?? '');
+      if (!this.userData.ipAddress) this.userData.ipAddress = clampString(license.ip_address ?? '');
     }
 
     if (device) {
@@ -466,6 +533,28 @@ export class AuthlyX {
     if (!this.hasRequiredCredentials()) return this.setFailure('AUTH_CONFIG', 'Missing AuthlyX credentials.');
 
     const url = this.buildUrl(endpoint);
+
+    try {
+      const urlHost = new URL(url).hostname;
+      const hijacked = await this.isDomainHijacked(urlHost);
+      if (hijacked) {
+        if (this.antiDebug) {
+          const proc: any = (globalThis as any).process;
+          if (proc) proc.exit(1);
+        }
+        return this.setFailure('DNS_HIJACK', 'DNS hijack detected.');
+      }
+    } catch {
+      // ignore parse errors on url
+    }
+
+    try {
+      const proc: any = (globalThis as any).process;
+      if (proc && proc.env) proc.env.no_proxy = '*';
+    } catch {
+      // ignore
+    }
+
     const sec = this.createSecurityContext();
 
     const payload = {
@@ -483,34 +572,45 @@ export class AuthlyX {
     const jsonBody = canonicalJson(payload);
     this.logger.log(`[SDK][REQUEST] POST ${url} ${jsonBody}`);
 
+    const maxAttempts = 3;
+    const retryDelays = [1000, 2000];
     let res: Response;
     let text = '';
-    try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-request-id': sec.requestId,
-          'x-auth-nonce': sec.nonce,
-          'x-auth-timestamp': String(sec.timestamp),
-        },
-        body: JSON.stringify(payload),
-      });
-      text = await res.text();
-    } catch (e: any) {
-      return this.setFailure('NETWORK_ERROR', 'Network error.', String(e?.message ?? e ?? ''), 0);
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-request-id': sec.requestId,
+            'x-auth-nonce': sec.nonce,
+            'x-auth-timestamp': String(sec.timestamp),
+          },
+          body: JSON.stringify(payload),
+        });
+        text = await res.text();
+        break;
+      } catch (e: any) {
+        this.logger.log(`[SDK] Network error on attempt ${attempt}: ${String(e?.message ?? e ?? '')}`);
+        if (attempt < maxAttempts) {
+          await new Promise(r => setTimeout(r, retryDelays[attempt - 1]));
+          continue;
+        }
+        return this.setFailure('NETWORK_ERROR', `Network error after ${maxAttempts} attempts.`, String(e?.message ?? e ?? ''), 0);
+      }
     }
 
-    this.response.statusCode = res.status;
+    this.response.statusCode = res!.status;
     this.response.raw = text || '';
     this.response.requestId = sec.requestId;
     this.response.nonce = sec.nonce;
 
-    this.logger.log(`[SDK][RESPONSE] ${res.status} ${text}`);
+    this.logger.log(`[SDK][RESPONSE] ${res!.status} ${text}`);
 
-    const meta = this.validateResponseMetadata(res.headers, sec.requestId, sec.nonce);
+    const meta = this.validateResponseMetadata(res!.headers, sec.requestId, sec.nonce);
     this.response.signatureKid = meta.kid || '';
-    if (!meta.ok) return this.setFailure(meta.code || 'AUTH_REQUEST_MISMATCH', meta.message || 'Request mismatch.', text, res.status);
+    if (!meta.ok) return this.setFailure(meta.code || 'AUTH_REQUEST_MISMATCH', meta.message || 'Request mismatch.', text, res!.status);
 
     const parsed = safeJsonParse(text);
     if (!parsed) return this.setFailure('BAD_RESPONSE', 'Invalid JSON response.', text, res.status);
@@ -547,6 +647,22 @@ export class AuthlyX {
     this.initialized = Boolean(resp.success) && Boolean(this.sessionId);
     this.loadUpdateData(resp);
     await this.promptUpdateIfNeeded(String(this.response.code || '').toUpperCase() === 'UPDATE_REQUIRED');
+
+    if (this.initialized) {
+      try {
+        const proc: any = (globalThis as any).process;
+        if (proc && proc.argv?.[1]) {
+          const fs = require('node:fs');
+          const content = fs.readFileSync(proc.argv[1]);
+          this.originalHash = await sha256HexFromString(content.toString('utf8'));
+        }
+      } catch {
+        // ignore
+      }
+      this.startIntegrityHeartbeat();
+      this.startExeIntegrityCheck();
+    }
+
     return Boolean(resp.success);
   }
 
@@ -566,7 +682,10 @@ export class AuthlyX {
       ip_address: this.userData.ipAddress || undefined,
     });
     if (!resp) return false;
-    if (resp.success) await this.loadUserData(resp);
+    if (resp.success) {
+      await this.loadUserData(resp);
+      await this.checkBlacklist();
+    }
     return Boolean(resp.success);
   }
 
@@ -579,7 +698,10 @@ export class AuthlyX {
       ip_address: this.userData.ipAddress || undefined,
     });
     if (!resp) return false;
-    if (resp.success) await this.loadUserData(resp);
+    if (resp.success) {
+      await this.loadUserData(resp);
+      await this.checkBlacklist();
+    }
     return Boolean(resp.success);
   }
 
