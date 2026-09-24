@@ -8,7 +8,7 @@ export default defineConfig([
     sourcemap: false,
     clean: true,
     target: 'es2022',
-    platform: 'neutral',
+    platform: 'node',
     external: ['readline', 'child_process'],
     treeshake: true,
     splitting: false,

@@ -1,3 +1,4 @@
+// AuthlyX SDK V2.4
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,7 +32,7 @@ export function createNodeFileLogger(options: { enabled: boolean; appName: strin
             fs.renameSync(file, oldFile);
           }
         } catch {
-          // file does not exist yet, ignore
+
         }
         const hh = String(now.getUTCHours()).padStart(2, '0');
         const mm = String(now.getUTCMinutes()).padStart(2, '0');

@@ -1,3 +1,4 @@
+// AuthlyX SDK V2.4
 export function clampString(input: unknown): string {
   if (input === null || input === undefined) return '';
   return String(input);
@@ -24,7 +25,12 @@ export function nowMs(): number {
 }
 
 export function parseIsoMs(iso: string): number | null {
-  const ms = Date.parse(iso);
+
+
+
+  const hasOffset = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso);
+  const normalized = hasOffset ? iso : iso.replace(' ', 'T') + 'Z';
+  const ms = Date.parse(normalized);
   return Number.isFinite(ms) ? ms : null;
 }
 

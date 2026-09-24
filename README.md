@@ -1,15 +1,17 @@
-# AuthlyX npm SDK (Universal)
+# AuthlyX npm SDK
 
 This folder is a publish-ready npm package version of the AuthlyX JavaScript SDK.
 
-It is designed to run in:
+The certificate-pinned API transport requires Node.js 18+ (including Electron's
+Node process and Node serverless runtimes). It uses `node:https` and `node:tls`
+to validate the normal certificate chain and hostname, then check CA certificate
+SHA-256 pins before sending HTTP data. The separate public-IP lookup still uses
+`fetch`.
 
-- Browsers (Vite/Webpack/Rollup)
-- Node.js 18+
-- Bun
-- Deno (npm compatibility)
-- Electron
-- Serverless/Workers (as long as `fetch` is available)
+Browsers and fetch-only workers cannot expose the TLS peer chain and are not
+supported by this transport. Bun and Deno compatibility requires verification
+of their Node TLS APIs before deployment. The SDK does not fall back to unpinned
+API requests.
 
 ## Install
 

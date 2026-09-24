@@ -1,4 +1,4 @@
-// AuthlyX SDK Version 2.2
+// AuthlyX SDK V2.4
 import type {
   AuthlyXChatMessages,
   AuthlyXInitOptions,
@@ -12,6 +12,7 @@ import { canonicalJson, clampString, computeDaysLeft, safeJsonParse } from './ut
 import { randomBytesHex, randomUUID } from './random';
 import { verifyEd25519Signature, sha256HexFromString } from './crypto';
 import dns from 'node:dns';
+import { postPinnedJson, type ApiResponse } from './tls';
 
 type SecurityContext = { requestId: string; nonce: string; timestamp: number };
 
@@ -161,7 +162,7 @@ export class AuthlyX {
     const resp = await this.post('blacklist/check', {
       session_id: this.sessionId,
       hwid: this.userData.hwidSid || undefined,
-      ip: this.userData.ipAddress || undefined,
+      ip: (this.userData.ipAddress || (await this.getPublicIpCached())) || undefined,
     });
     return Boolean(resp && resp.success);
   }
@@ -238,7 +239,7 @@ export class AuthlyX {
         return text;
       }
     } catch {
-      // ignore
+
     }
     return '';
   }
@@ -340,7 +341,7 @@ export class AuthlyX {
     if (!proc || !proc.platform) return;
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const childProcess = require('child_process');
       if (proc.platform === 'win32') childProcess.exec(`cmd /c start "" "${target}"`);
       else if (proc.platform === 'darwin') childProcess.exec(`open "${target}"`);
@@ -450,7 +451,7 @@ export class AuthlyX {
       return;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const readline = require('readline');
     const rl = readline.createInterface({ input: proc.stdin, output: proc.stdout });
     const answer = await new Promise<string>((resolve) => rl.question('Download the latest version now? (Y/N): ', resolve));
@@ -507,7 +508,15 @@ export class AuthlyX {
     }
 
     if (!this.userData.ipAddress) this.userData.ipAddress = await this.getPublicIpCached();
-    this.userData.daysLeft = computeDaysLeft(this.userData.expiryDate);
+
+
+
+
+    const rawDaysLeft = root?.days_left ?? user?.days_left ?? license?.days_left ?? device?.days_left;
+    const parsedDaysLeft = Number(rawDaysLeft);
+    this.userData.daysLeft = rawDaysLeft !== undefined && rawDaysLeft !== null && !Number.isNaN(parsedDaysLeft)
+      ? parsedDaysLeft
+      : computeDaysLeft(this.userData.expiryDate);
   }
 
   private loadVariableData(obj: any): void {
@@ -545,14 +554,14 @@ export class AuthlyX {
         return this.setFailure('DNS_HIJACK', 'DNS hijack detected.');
       }
     } catch {
-      // ignore parse errors on url
+
     }
 
     try {
       const proc: any = (globalThis as any).process;
       if (proc && proc.env) proc.env.no_proxy = '*';
     } catch {
-      // ignore
+
     }
 
     const sec = this.createSecurityContext();
@@ -574,20 +583,16 @@ export class AuthlyX {
 
     const maxAttempts = 3;
     const retryDelays = [1000, 2000];
-    let res: Response;
+    let res!: ApiResponse;
     let text = '';
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        res = await fetch(url, {
-          method: 'POST',
-          headers: {
+        res = await postPinnedJson(url, JSON.stringify(payload), {
             'content-type': 'application/json',
             'x-request-id': sec.requestId,
             'x-auth-nonce': sec.nonce,
             'x-auth-timestamp': String(sec.timestamp),
-          },
-          body: JSON.stringify(payload),
         });
         text = await res.text();
         break;
@@ -615,7 +620,7 @@ export class AuthlyX {
     const parsed = safeJsonParse(text);
     if (!parsed) return this.setFailure('BAD_RESPONSE', 'Invalid JSON response.', text, res.status);
 
-    // Optional response signature verification
+
     const canonicalRespBody = canonicalJson(parsed);
     const verified = await this.maybeVerifySignedResponse(res.headers, sec.requestId, sec.nonce, canonicalRespBody);
     if (!verified) return this.setFailure('INVALID_SIGNATURE', 'Response signature verification failed.', text, res.status);
@@ -640,7 +645,7 @@ export class AuthlyX {
   }
 
   async Init(): Promise<boolean> {
-    const resp = await this.post('init', {});
+    const resp = await this.post('init', { ip: (await this.getPublicIpCached()) || undefined });
     if (!resp) return false;
 
     this.sessionId = clampString(resp.session_id ?? resp.sessionId ?? '');
@@ -657,7 +662,7 @@ export class AuthlyX {
           this.originalHash = await sha256HexFromString(content.toString('utf8'));
         }
       } catch {
-        // ignore
+
       }
       this.startIntegrityHeartbeat();
       this.startExeIntegrityCheck();
@@ -679,7 +684,7 @@ export class AuthlyX {
       password: clampString(password),
       session_id: this.sessionId,
       sid: this.userData.hwidSid || undefined,
-      ip_address: this.userData.ipAddress || undefined,
+      ip: (await this.getPublicIpCached()) || undefined,
     });
     if (!resp) return false;
     if (resp.success) {
@@ -695,7 +700,7 @@ export class AuthlyX {
       license_key: clampString(licenseKey),
       session_id: this.sessionId,
       sid: this.userData.hwidSid || undefined,
-      ip_address: this.userData.ipAddress || undefined,
+      ip: (await this.getPublicIpCached()) || undefined,
     });
     if (!resp) return false;
     if (resp.success) {
@@ -712,7 +717,7 @@ export class AuthlyX {
       device_id: clampString(deviceId),
       session_id: this.sessionId,
       sid: this.userData.hwidSid || undefined,
-      ip_address: this.userData.ipAddress || undefined,
+      ip: (await this.getPublicIpCached()) || undefined,
     });
     if (!resp) return false;
     if (resp.success) await this.loadUserData(resp);
@@ -728,7 +733,7 @@ export class AuthlyX {
       email: clampString(email),
       session_id: this.sessionId,
       sid: this.userData.hwidSid || undefined,
-      ip_address: this.userData.ipAddress || undefined,
+      ip: (await this.getPublicIpCached()) || undefined,
     });
     if (!resp) return false;
     if (resp.success) await this.loadUserData(resp);
@@ -805,7 +810,7 @@ export class AuthlyX {
     return Boolean(resp && resp.success);
   }
 
-  // Lowercase aliases (quality-of-life) so both `Init/init`, `Login/login`, etc work.
+
   setLogger(logger: Logger): void { return this.SetLogger(logger); }
   log(message: string): void { return this.Log(message); }
   isInitialized(): boolean { return this.IsInitialized(); }

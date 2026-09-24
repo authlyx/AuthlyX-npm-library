@@ -1,11 +1,14 @@
 {
   "name": "authlyx",
-  "version": "2.2.0",
-  "description": "AuthlyX JavaScript/TypeScript SDK (universal: Node, browser, workers).",
+  "version": "2.4.0",
+  "description": "AuthlyX JavaScript/TypeScript SDK for Node.js with TLS certificate-chain pinning.",
   "license": "MIT",
   "author": "AuthlyX",
   "type": "module",
   "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

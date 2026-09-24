@@ -1,3 +1,4 @@
+// AuthlyX SDK V2.4
 function getCrypto(): Crypto | null {
   const g: any = globalThis as any;
   return g && g.crypto ? (g.crypto as Crypto) : null;
@@ -12,7 +13,7 @@ export function randomBytesHex(byteLen: number): string {
       .map((x) => x.toString(16).padStart(2, '0'))
       .join('');
   }
-  // Very old environments: last-resort fallback
+
   let out = '';
   for (let i = 0; i < byteLen; i++) out += Math.floor(Math.random() * 256).toString(16).padStart(2, '0');
   return out;
@@ -22,7 +23,7 @@ export function randomUUID(): string {
   const c = getCrypto() as any;
   if (c && typeof c.randomUUID === 'function') return String(c.randomUUID());
 
-  // RFC4122 v4-ish using getRandomValues if possible.
+
   const bytes = new Uint8Array(16);
   if (c && c.getRandomValues) c.getRandomValues(bytes);
   else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);

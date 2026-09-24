@@ -1,3 +1,4 @@
+// AuthlyX SDK V2.4
 const SENSITIVE_PATTERNS: RegExp[] = [
   /("session_id"\s*:\s*")([^"]+)(")/gi,
   /("owner_id"\s*:\s*")([^"]+)(")/gi,
@@ -37,8 +38,8 @@ export function createConsoleLogger(enabled: boolean): Logger {
     log: (line: string) => {
       if (!enabled) return;
       if (!line || !String(line).trim()) return;
-      // Keep this minimal for "everywhere". Node file logging is in ./node
-      // eslint-disable-next-line no-console
+
+
       console.log(maskSensitive(line));
     },
   };

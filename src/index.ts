@@ -1,3 +1,4 @@
+// AuthlyX SDK V2.4
 export { AuthlyX } from './sdk';
 export type {
   AuthlyXResponse,

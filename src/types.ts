@@ -1,3 +1,4 @@
+// AuthlyX SDK V2.4
 export type AuthlyXResponse = {
   success: boolean;
   message: string;
