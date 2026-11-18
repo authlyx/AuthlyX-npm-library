@@ -1,7 +1,24 @@
 {
   "name": "authlyx",
   "version": "3.0.0-beta.1",
-  "private": true,
+  "description": "Official Node.js SDK for AuthlyX: licensing, user sign-in, device locks, offline access and update prompts",
+  "keywords": [
+    "authlyx",
+    "licensing",
+    "license",
+    "authentication",
+    "hwid"
+  ],
+  "homepage": "https://authlyx.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/authlyx/AuthlyX-npm-library.git"
+  },
+  "bugs": {
+    "url": "https://github.com/authlyx/AuthlyX-npm-library/issues"
+  },
+  "license": "MIT",
+  "author": "AuthlyX",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -31,6 +48,5 @@
   "devDependencies": {
     "typescript": "^7.0.2",
     "@types/node": "^26.0.0"
-  },
-  "license": "MIT"
+  }
 }
