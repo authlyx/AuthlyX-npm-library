@@ -1,91 +1,85 @@
-# AuthlyX npm SDK
+# AuthlyX TypeScript SDK
 
-This folder is a publish-ready npm package version of the AuthlyX JavaScript SDK.
+Official TypeScript SDK and console example for AuthlyX V3 (3.0.0 beta). It runs on Node.js.
 
-The certificate-pinned API transport requires Node.js 18+ (including Electron's
-Node process and Node serverless runtimes). It uses `node:https` and `node:tls`
-to validate the normal certificate chain and hostname, then check CA certificate
-SHA-256 pins before sending HTTP data. The separate public-IP lookup still uses
-`fetch`.
+Full documentation: https://docs.authlyx.dev
 
-Browsers and fetch-only workers cannot expose the TLS peer chain and are not
-supported by this transport. Bun and Deno compatibility requires verification
-of their Node TLS APIs before deployment. The SDK does not fall back to unpinned
-API requests.
+## Requirements
 
-## Install
+- Windows
+- Node.js 22 or newer
 
-```bash
-npm install authlyx
+## Run the example
+
+Install the dev tools, then put your app key and version in `examples/main.ts`:
+
+```typescript
+const app = new AuthlyX("YOUR_APP_KEY", "1.0.0");
 ```
 
-## Quick start
-
-```js
-import { AuthlyX } from "authlyx";
-
-const AuthlyXApp = new AuthlyX(
-  "12345678",
-  "HI",
-  "1.3",
-  "your-secret"
-);
-
-await AuthlyXApp.Init();
-if (!AuthlyXApp.response.success) {
-  console.log(AuthlyXApp.response.message);
-  throw new Error("Init failed");
-}
-
-await AuthlyXApp.Login("12", "1");
-console.log(AuthlyXApp.response.success, AuthlyXApp.userData.subscriptionLevel);
+```bat
+npm install
+npm run example
 ```
 
-## Optional parameters
+You can find your app key under your app's credentials in the [dashboard](https://dash.authlyx.dev).
 
-You can pass `debug` and `api`:
+## Add it to your own project
 
-```js
-import { AuthlyX } from "authlyx";
+Build the SDK with `npm run build`, or copy the `src` folder into your project:
 
-const AuthlyXApp = new AuthlyX(
-  "12345678",
-  "HI",
-  "1.3",
-  "your-secret",
-  { debug: false, api: "https://example.com/api/v2" }
-);
+```typescript
+import { AuthlyX } from "./src/index.js";
+
+const app = new AuthlyX("YOUR_APP_KEY", "1.0.0");
+
+const connected = await app.initialize();
+console.log(connected.ok ? "Connected" : connected.message);
 ```
 
-## Unified Login
+Every method returns a promise. You can also pass a callback as the last argument instead.
 
-`Login(identifier, password = null, deviceType = null)` routes automatically:
+## Signing in
 
-```js
-// Username + password
-await AuthlyXApp.Login("12", "1");
-
-// License key only
-await AuthlyXApp.Login("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX");
-
-// Device login
-await AuthlyXApp.Login("YOUR_DEVICE_ID", null, "motherboard");
+```typescript
+await app.login("YOUR_USERNAME", "YOUR_PASSWORD");
+await app.login("YOUR_LICENSE_KEY");
+await app.deviceLogin();
 ```
 
-## Node-only helpers (optional)
+Device login signs in the current Windows user without a form. The device has to be approved in your app first. See [Device login](https://docs.authlyx.dev/guides/device-login).
 
-If you want file logs in `ProgramData/AuthlyX/{appName}` or Windows SID detection, import the node subpath:
+After signing in, the account details are in `userData`:
 
-```js
-import { createNodeFileLogger, getWindowsSid } from "authlyx/node";
+```typescript
+const username = app.userData.Username;
+const plan = app.userData.Plan;
+const expiry = app.userData.ExpiryDate;
 ```
 
-You can plug the file logger into the SDK like this:
+Every method has its own page with examples under [SDK methods](https://docs.authlyx.dev/sdks/methods/login).
 
-```js
-import { AuthlyX } from "authlyx";
-import { createNodeFileLogger } from "authlyx/node";
+Run `npm test` to check the SDK's public interface.
 
-const sdk = new AuthlyX("12345678", "HI", "1.3", "your-secret");
-sdk.SetLogger(createNodeFileLogger({ enabled: true, appName: "HI" }));
+## Offline access
+
+Once someone is signed in, saving offline access stores a signed permit on that PC:
+
+```typescript
+const saved = await app.saveOfflineAccess();
+const available = await app.hasOfflineAccess();
 ```
+
+If they open your app later without internet, they sign in with the same username and password or license key, and the SDK checks it against the saved permit. Each permit belongs to one app and one account, and signing out removes it. More in [Offline access](https://docs.authlyx.dev/guides/offline).
+
+## Errors
+
+A failed call gives you a `code` and a `message` you can show to the user. Network problems and some setup errors throw `AuthlyXError` instead, so wrap `initialize()` in `try` like the example does. All codes are listed in [Errors](https://docs.authlyx.dev/api-reference/errors).
+
+## Coming from 2.4
+
+V3 is a new SDK, not a drop-in update. Apps use an app key instead of the old owner ID, app name and secret, and the method names changed. Read [Move from V2 to V3](https://docs.authlyx.dev/api-reference/migration) before you switch.
+
+## License
+
+MIT. See `LICENSE`.
